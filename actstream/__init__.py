@@ -6,10 +6,11 @@ except ImportError:
 __version_info__ = {
     'major': 0,
     'minor': 4,
-    'micro': 0,
-    'releaselevel': 'beta',
-    'serial': 1
+    'micro': 4,
+    'releaselevel': 'final',
+    'serial': 0
 }
+
 
 def get_version(release_level=True):
     """
@@ -19,5 +20,6 @@ def get_version(release_level=True):
     if release_level and __version_info__['releaselevel'] != 'final':
         vers.append('%(releaselevel)s%(serial)i' % __version_info__)
     return ''.join(vers)
+
 
 __version__ = get_version()

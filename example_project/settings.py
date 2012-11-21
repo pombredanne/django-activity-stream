@@ -33,7 +33,7 @@ SITE_ID = 1
 
 # If you set this to False, Django will make some optimizations so as not
 # to load the internationalization machinery.
-USE_I18N = False
+USE_I18N = True
 
 # Absolute path to the directory that holds media.
 # Example: "/home/media/media.lawrence.com/"
@@ -65,6 +65,7 @@ MIDDLEWARE_CLASSES = (
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
 )
 
 ROOT_URLCONF = 'example_project.urls'
@@ -89,10 +90,14 @@ INSTALLED_APPS = (
     'testapp',
     'south',
     'actstream',
+    'debug_toolbar',
 )
 
 TEMPLATE_CONTEXT_PROCESSORS = (
+    # for django 1.2 or 1.3
     'django.core.context_processors.auth',
+    # for django 1.4 comment above line and uncomment below
+    #'django.contrib.auth.context_processors.auth',
     'django.core.context_processors.debug',
     'django.core.context_processors.i18n',
     'django.core.context_processors.media',
@@ -116,11 +121,22 @@ ABSOLUTE_URL_OVERRIDES = {
 
 ACCOUNT_ACTIVATION_DAYS = 7
 
-ACTSTREAM_ACTION_MODELS = ('auth.user', 'auth.group', 'sites.site')
+ACTSTREAM_SETTINGS = {
+    'MODELS': ('auth.user', 'auth.group', 'sites.site', 'comments.comment'),
+    'MANAGER': 'testapp.streams.MyActionManager',
+    'FETCH_RELATIONS': True,
+    'USE_PREFETCH': True,
+    'USE_JSONFIELD': True,
+    'GFK_FETCH_DEPTH': 0,
+}
 
-ACTSTREAM_MANAGER = 'testapp.streams.MyActionManager'
 
-FETCH_RELATIONS = True
+DEBUG_TOOLBAR_PANELS = (
+    'debug_toolbar.panels.template.TemplateDebugPanel',
+)
 
-USE_PREFETCH = False
+INTERNAL_IPS = ('127.0.0.1',)
 
+DEBUG_TOOLBAR_CONFIG = {
+    'INTERCEPT_REDIRECTS': False,
+}

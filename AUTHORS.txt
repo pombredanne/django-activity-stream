@@ -14,3 +14,13 @@ Jason Culverhouse
 Dave Harrington
 Pedro Bur—n
 Ryan Quigley
+Neelesh Shastry
+David Gouldin <david@gould.in>
+Donald Stufft
+Nolan Brubaker
+Herman Schaaf
+Walter Scheper
+Chris Beaven
+Vineet Naik
+Walter Scheper
+Bolster Labs <ops@bolsterlabs.com>
