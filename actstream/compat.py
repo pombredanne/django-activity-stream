@@ -1,12 +1,11 @@
+"""
+Django>=1.5 compatibility utilities
+"""
+
 from django.conf import settings
 
-
-# Django 1.5 compatibility utilities, providing support for custom User models.
-# Since get_user_model() causes a circular import if called when app models are
-# being loaded, the user_model_label should be used when possible, with calls
-# to get_user_model deferred to execution time
-
 user_model_label = getattr(settings, 'AUTH_USER_MODEL', 'auth.User')
+username_field = lambda: getattr(get_user_model(), 'USERNAME_FIELD', 'username')
 
 try:
     from django.contrib.auth import get_user_model
@@ -18,3 +17,21 @@ try:
     from django.utils.encoding import smart_text
 except ImportError:
     from django.utils.encoding import smart_unicode as smart_text
+
+try:
+    from django.contrib.contenttypes import fields as generic
+except ImportError:
+    from django.contrib.contenttypes import generic
+
+try:
+    from django.apps import AppConfig
+    from django.apps import apps
+    get_model = apps.get_model
+except ImportError:
+    from django.db.models import get_model
+
+    class AppConfig(object):
+        name = None
+
+        def get_model(self, model_name):
+            return get_model(self.name.split('.')[-1], model_name, only_installed=False)

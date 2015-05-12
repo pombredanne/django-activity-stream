@@ -19,8 +19,8 @@ set the ``actor_only`` parameter to ``False``:
 
 .. code-block:: python
 
-	# Follow the group wherever it appears in activity.
-	follow(request.user, group, actor_only=False)
+    # Follow the group wherever it appears in activity.
+    follow(request.user, group, actor_only=False)
 
 You can also just make a request to the ``actstream_follow`` view while authenticated.
 The request can use either ``GET`` or ``POST``.
@@ -29,6 +29,15 @@ The request can use either ``GET`` or ``POST``.
 
     curl -X GET http://localhost:8000/activity/follow/<content_type_id>/<object_id>/ # Follow
     curl -X GET http://localhost:8000/activity/unfollow/<content_type_id>/<object_id>/?next=/blog/ # Unfollow and redirect
+
+If you wish to pass the ``actor_only`` parameter, the procedure is identical, only you will use ``folow_all`` and ``unfolow_all`` in your request.
+For example:
+
+.. code-block:: bash
+
+    curl -X GET http://localhost:8000/activity/follow_all/<content_type_id>/<object_id>/ # Follow
+    curl -X GET http://localhost:8000/activity/unfollow_all/<content_type_id>/<object_id>/?next=/blog/ # Unfollow and redirect
+
 
 Then the current logged in user will follow the actor defined by ``content_type_id`` & ``object_id``. Optional ``next`` parameter is URL to redirect to.
 

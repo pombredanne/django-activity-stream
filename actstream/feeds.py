@@ -1,115 +1,169 @@
+import json
+
 from django.shortcuts import get_object_or_404
 from django.core.urlresolvers import reverse
-from django.utils.feedgenerator import Atom1Feed, rfc3339_date, get_tag_uri
+from django.utils.feedgenerator import Atom1Feed, rfc3339_date
 from django.contrib.contenttypes.models import ContentType
+from django.contrib.syndication.views import Feed, add_domain
+from django.contrib.sites.models import Site
+from django.utils.encoding import force_text
+from django.utils.six import text_type
+from django.utils import datetime_safe
+from django.views.generic import View
+from django.http import HttpResponse
 
-try:
-    from django.contrib.syndication.views import Feed
-except ImportError:   # Pre 1.2
-    from django.contrib.syndication.feeds import Feed
-
-from actstream.models import model_stream, user_stream, action_object_stream
-
-
-class AtomWithContentFeed(Atom1Feed):
-
-    def add_item_elements(self, handler, item):
-        super(AtomWithContentFeed, self).add_item_elements(handler, item)
-        if 'content' in item:
-            handler.addQuickElement(u"content", item['content'],
-                {'type': 'html'})
+from actstream.models import Action, model_stream, user_stream, any_stream
 
 
-class ObjectActivityFeed(Feed):
+class AbstractActivityStream(object):
     """
-    Feed of Activity for a given object (where the object is the Object or
-    Target).
+    Abstract base class for all stream rendering.
+    Supports hooks for fetching streams and formatting actions.
     """
+    def get_stream(self, *args, **kwargs):
+        """
+        Returns a stream method to use.
+        """
+        raise NotImplementedError
 
-    def get_object(self, request, content_type_id, object_id):
-        return get_object_or_404(ContentType, pk=content_type_id)\
-            .get_object_for_this_type(pk=object_id)
+    def get_object(self, *args, **kwargs):
+        """
+        Returns the object (eg user or actor) that the stream is for.
+        """
+        raise NotImplementedError
 
-    def title(self, obj):
-        return 'Activity for %s' % obj
+    def items(self, *args, **kwargs):
+        """
+        Returns a queryset of Actions to use based on the stream method and object.
+        """
+        return self.get_stream()(self.get_object(*args, **kwargs))
 
-    def link(self, obj):
-        if hasattr(obj, 'get_absolute_url'):
-            return obj.get_absolute_url()
-        return reverse('actstream_actor', None,
-                    (ContentType.objects.get_for_model(obj).pk, obj.pk))
+    def get_uri(self, action, obj=None, date=None):
+        """
+        Returns an RFC3987 IRI ID for the given object, action and date.
+        """
+        if date is None:
+            date = action.timestamp
+        date = datetime_safe.new_datetime(date).strftime('%Y-%m-%d')
+        return 'tag:%s,%s:%s' % (Site.objects.get_current().domain, date,
+                                 self.get_url(action, obj, False))
 
-    def description(self, obj):
-        return 'Activity for %s' % obj
+    def get_url(self, action, obj=None, domain=True):
+        """
+        Returns an RFC3987 IRI for a HTML representation of the given object, action.
+        If domain is true, the current site's domain will be added.
+        """
+        if not obj:
+            url = reverse('actstream_detail', None, (action.pk,))
+        elif hasattr(obj, 'get_absolute_url'):
+            url = obj.get_absolute_url()
+        else:
+            ctype = ContentType.objects.get_for_model(obj)
+            url = reverse('actstream_actor', None, (ctype.pk, obj.pk))
+        if domain:
+            return add_domain(Site.objects.get_current().domain, url)
+        return url
 
-    def items(self, obj):
-        i = action_object_stream(obj)
-        if i:
-            return i[:30]
-        return []
+    def format(self, action):
+        """
+        Returns a formatted dictionary for the given action.
+        """
+        item = {
+            'id': self.get_uri(action),
+            'url': self.get_url(action),
+            'verb': action.verb,
+            'published': rfc3339_date(action.timestamp),
+            'actor': self.format_actor(action),
+            'title': text_type(action),
+        }
+        if action.description:
+            item['content'] = action.description
+        if action.target:
+            item['target'] = self.format_target(action)
+        if action.action_object:
+            item['object'] = self.format_action_object(action)
+        return item
 
-    def item_extra_kwargs(self, obj):
-        return  {
-            'content': obj.description,
+    def format_item(self, action, item_type='actor'):
+        """
+        Returns a formatted dictionary for an individual item based on the action and item_type.
+        """
+        obj = getattr(action, item_type)
+        return {
+            'id': self.get_uri(action, obj),
+            'url': self.get_url(action, obj),
+            'objectType': ContentType.objects.get_for_model(obj).name,
+            'displayName': text_type(obj)
         }
 
+    def format_actor(self, action):
+        """
+        Returns a formatted dictionary for the actor of the action.
+        """
+        return self.format_item(action)
 
-class AtomObjectActivityFeed(ObjectActivityFeed):
-    feed_type = AtomWithContentFeed
-    subtitle = ObjectActivityFeed.description
+    def format_target(self, action):
+        """
+        Returns a formatted dictionary for the target of the action.
+        """
+        return self.format_item(action, 'target')
+
+    def format_action_object(self, action):
+        """
+        Returns a formatted dictionary for the action object of the action.
+        """
+        return self.format_item(action, 'action_object')
 
 
-class ActivityStreamsFeed(AtomWithContentFeed):
+class ActivityStreamsAtomFeed(Atom1Feed):
     """
-    Custom feed generator for Activity Stream feeds
+    Feed rendering class for the v1.0 Atom Activity Stream Spec
     """
-
     def root_attributes(self):
-        attrs = super(ActivityStreamsFeed, self).root_attributes()
-        attrs['xmlns: activity'] = 'http: //activitystrea.ms/spec/1.0/'
+        attrs = super(ActivityStreamsAtomFeed, self).root_attributes()
+        attrs['xmlns:activity'] = 'http://activitystrea.ms/spec/1.0/'
         return attrs
 
     def add_root_elements(self, handler):
-        super(ActivityStreamsFeed, self).add_root_elements(handler)
+        super(ActivityStreamsAtomFeed, self).add_root_elements(handler)
+
+    def quick_elem(self, handler, key, value):
+        if key == 'link':
+            handler.addQuickElement(key, None, {
+                'href': value, 'type': 'text/html', 'rel': 'alternate'})
+        else:
+            handler.addQuickElement(key, value)
+
+    def item_quick_handler(self, handler, name, item):
+        handler.startElement(name, {})
+        for key, value in item.items():
+            self.quick_elem(handler, key, value)
+        handler.endElement(name)
 
     def add_item_elements(self, handler, item):
-        super(ActivityStreamsFeed, self).add_item_elements(handler, item)
-        handler.addQuickElement(u"activity: verb", item['verb'])
+        item.pop('unique_id')
+        actor = item.pop('actor')
+        target = item.pop('target', None)
+        action_object = item.pop('action_object', None)
+        content = item.pop('content', None)
 
-        if 'actor' in item:
-            handler.startElement('author', {})
-            handler.addQuickElement('name', item['actor'].display_name)
-            handler.addQuickElement('uri', get_tag_uri(
-                item['actor'].get_absolute_url(), None))
-            handler.addQuickElement('id', item['actor'].get_absolute_url())
-            handler.addQuickElement('activity: object-type', 'person')
-            handler.addQuickElement('link', get_tag_uri(
-                item['actor'].get_absolute_url(), None), {'type': 'text/html'})
-            handler.endElement('author')
+        if content:
+            handler.addQuickElement('content', content, {'type': 'html'})
 
-        if 'object' in item:
-            handler.startElement('activity: object', {})
-            handler.addQuickElement('id', item['object_id'])
-            handler.addQuickElement('title', item['object_title'])
-            handler.addQuickElement('published',
-                rfc3339_date(item['object_timestamp']).decode('utf-8'))
-            handler.addQuickElement('link', item['object'].get_absolute_url(),
-                {'type': 'text/html'})
-            handler.addQuickElement('activity: object-type',
-                item['object_object_type'])
-            handler.endElement('activity: object')
+        for key, value in item.items():
+            if value:
+                self.quick_elem(handler, key, value)
 
-        if 'target' in item:
-            handler.startElement('activity: target', {})
-            handler.addQuickElement('id', item['target_id'])
-            handler.addQuickElement('title', item['target_title'])
-            handler.addQuickElement('activity: object-type',
-                str(item['target_object_type']))
-            handler.endElement('activity: target')
+        self.item_quick_handler(handler, 'author', actor)
+
+        if action_object:
+            self.item_quick_handler(handler, 'activity:object', action_object)
+
+        if target:
+            self.item_quick_handler(handler, 'activity:target', target)
 
 
-class ActivityStreamsObjectActivityFeed(AtomObjectActivityFeed):
-    feed_type = ActivityStreamsFeed
+class ActivityStreamsBaseFeed(AbstractActivityStream, Feed):
 
     def feed_extra_kwargs(self, obj):
         """
@@ -118,82 +172,121 @@ class ActivityStreamsObjectActivityFeed(AtomObjectActivityFeed):
         """
         return {}
 
-    def item_extra_kwargs(self, obj):
+    def item_extra_kwargs(self, action):
         """
         Returns an extra keyword arguments dictionary that is used with
         the `add_item` call of the feed generator.
         Add the 'content' field of the 'Entry' item, to be used by the custom
         feed generator.
         """
-        try:
-            object_id = obj.action_object.get_absolute_url()
-        except:
-            object_id = '%s/%s' % (obj.action_object_content_type.model,
-                obj.action_object.id)
-
-        object_id = get_tag_uri(object_id, None)
-
-        item = {
-            'content': obj.description,
-            'actor': obj.actor,
-            'verb': obj.verb_uri_prefix + obj.verb,
-            # action object
-            'object_timestamp': obj.timestamp,
-            'object': obj.action_object,
-            'object_id': object_id,
-            'object_title': unicode(obj.action_object),
-            'object_object_type': obj.action_object_content_type.model,
-        }
-
-        if obj.target:
-            try:
-                target_id = obj.target.get_absolute_url()
-            except Exception:
-                target_id = '%s/%s' % (obj.target_content_type.model,
-                    obj.action_object.id)
-
-            target_id = get_tag_uri(target_id, obj.timestamp)
-
-            item['target'] = obj.target
-            item['target_id'] = target_id
-            item['target_title'] = unicode(obj.target)
-            item['target_object_type'] = obj.target_content_type.name
-
+        item = self.format(action)
+        item.pop('title', None)
+        item['uri'] = item.pop('url')
+        item['activity:verb'] = item.pop('verb')
         return item
 
+    def format_item(self, action, item_type='actor'):
+        name = item_type == 'actor' and 'name' or 'title'
+        item = super(ActivityStreamsBaseFeed, self).format_item(action, item_type)
+        item[name] = item.pop('displayName')
+        item['activity:object-type'] = item.pop('objectType')
+        item.pop('url')
+        return item
 
-class ModelActivityFeed(Feed):
+    def item_link(self, action):
+        return self.get_url(action)
+
+    def item_description(self, action):
+        if action.description:
+            return force_text(action.description)
+
+    def items(self, obj):
+        return self.get_stream()(obj)[:30]
+
+
+class JSONActivityFeed(AbstractActivityStream, View):
+    """
+    Feed that generates feeds compatible with the v1.0 JSON Activity Stream spec
+    """
+    def dispatch(self, request, *args, **kwargs):
+        return HttpResponse(self.serialize(request, *args, **kwargs),
+                            content_type='application/json')
+
+    def serialize(self, request, *args, **kwargs):
+        items = self.items(request, *args, **kwargs)
+        return json.dumps({
+            'totalItems': len(items),
+            'items': [self.format(action) for action in items]
+        }, indent=4 if 'pretty' in request.GET or 'pretty' in request.POST else None)
+
+
+class ModelActivityMixin(object):
 
     def get_object(self, request, content_type_id):
         return get_object_or_404(ContentType, pk=content_type_id).model_class()
 
-    def title(self, model):
-        return 'Activity feed from %s' % model
-
-    def link(self, model):
-        return reverse('actstream_model', None,
-                (ContentType.objects.get_for_model(model).pk,))
-
-    def description(self, model):
-        return 'Public activities of %s' % model
-
-    def items(self, model):
-        i = model_stream(model)
-        if i:
-            return i[:30]
-        return []
+    def get_stream(self):
+        return model_stream
 
 
-class AtomModelActivityFeed(ModelActivityFeed):
-    feed_type = Atom1Feed
-    subtitle = ModelActivityFeed.description
+class ObjectActivityMixin(object):
+
+    def get_object(self, request, content_type_id, object_id):
+        obj = get_object_or_404(ContentType, pk=content_type_id)
+        return obj.get_object_for_this_type(pk=object_id)
+
+    def get_stream(self):
+        return any_stream
 
 
-class UserActivityFeed(Feed):
+class UserActivityMixin(object):
 
     def get_object(self, request):
         if request.user.is_authenticated():
             return request.user
+
+    def get_stream(self):
+        return user_stream
+
+
+class CustomStreamMixin(object):
+    name = None
+
+    def get_object(self):
+        return
+
+    def get_stream(self):
+        return getattr(Action.objects, self.name)
+
+    def items(self, *args, **kwargs):
+        return self.get_stream()(*args[1:], **kwargs)
+
+
+class ModelActivityFeed(ModelActivityMixin, ActivityStreamsBaseFeed):
+
+    def title(self, model):
+        return 'Activity feed from %s' % model.__name__
+
+    def link(self, model):
+        ctype = ContentType.objects.get_for_model(model)
+        return reverse('actstream_model', None, (ctype.pk,))
+
+    def description(self, model):
+        return 'Public activities of %s' % model.__name__
+
+
+class ObjectActivityFeed(ObjectActivityMixin, ActivityStreamsBaseFeed):
+    def title(self, obj):
+        return 'Activity for %s' % obj
+
+    def link(self, obj):
+        return self.get_url(obj)
+
+    def description(self, obj):
+        return 'Activity for %s' % obj
+
+
+class UserActivityFeed(UserActivityMixin, ActivityStreamsBaseFeed):
 
     def title(self, user):
         return 'Activity feed for your followed actors'
@@ -203,19 +296,61 @@ class UserActivityFeed(Feed):
             return reverse('actstream')
         if hasattr(user, 'get_absolute_url'):
             return user.get_absolute_url()
-        return reverse('actstream_actor', None,
-            (ContentType.objects.get_for_model(user).pk, user.pk))
+        ctype = ContentType.objects.get_for_model(user)
+        return reverse('actstream_actor', None, (ctype.pk, user.pk))
 
     def description(self, user):
         return 'Public activities of actors you follow'
 
-    def items(self, user):
-        i = user_stream(user)
-        if i:
-            return i[:30]
-        return []
-
 
 class AtomUserActivityFeed(UserActivityFeed):
-    feed_type = Atom1Feed
+    """
+    Atom feed of Activity for a given user (where actions are those that the given user follows).
+    """
+    feed_type = ActivityStreamsAtomFeed
     subtitle = UserActivityFeed.description
+
+
+class AtomModelActivityFeed(ModelActivityFeed):
+    """
+    Atom feed of Activity for a given model (where actions involve the given model as any of the entities).
+    """
+    feed_type = ActivityStreamsAtomFeed
+    subtitle = ModelActivityFeed.description
+
+
+class AtomObjectActivityFeed(ObjectActivityFeed):
+    """
+    Atom feed of Activity for a given object (where actions involve the given object as any of the entities).
+    """
+    feed_type = ActivityStreamsAtomFeed
+    subtitle = ObjectActivityFeed.description
+
+
+class UserJSONActivityFeed(UserActivityMixin, JSONActivityFeed):
+    """
+    JSON feed of Activity for a given user (where actions are those that the given user follows).
+    """
+    pass
+
+
+class ModelJSONActivityFeed(ModelActivityMixin, JSONActivityFeed):
+    """
+    JSON feed of Activity for a given model (where actions involve the given model as any of the entities).
+    """
+    pass
+
+
+class ObjectJSONActivityFeed(ObjectActivityMixin, JSONActivityFeed):
+    """
+    JSON feed of Activity for a given object (where actions involve the given object as any of the entities).
+    """
+    pass
+
+
+class CustomJSONActivityFeed(CustomStreamMixin, JSONActivityFeed):
+    """
+    JSON feed of Activity for a custom stream. self.name should be the name of the custom stream as defined in the Manager
+    and arguments may be passed either in the url or when calling as_view(...)
+    """
+    pass

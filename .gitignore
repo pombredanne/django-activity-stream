@@ -1,5 +1,9 @@
+/.tox/
 build
 dist
 *.pyc
 .DS_Store
 MANIFEST
+__pycache__
+/coverage/
+/.coverage

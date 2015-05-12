@@ -1,6 +1,32 @@
 Changelog
 ==========
 
+0.5.1
+-----
+
+  - Coverage testing using coveralls.io
+  - Feeds refactoring to include JSON and custom feeds
+  - Added "any" builtin stream
+  - Following method bugfix
+  - Register method bugfix
+  - Is installed check bugfix
+  - Tests for nested app models
+  - Moar tests!
+  - Added actstream/base.html template for extensibility help
+
+
+0.5.0
+-----
+
+  - Django 1.6 and 1.7 support
+  - Python 3 and PyPy support
+  - Added new activity_stream templatetag
+  - Dropping support for Django<=1.3 and rely on prefetch_related.
+  - Added register method for actionable models
+  - Dropped support for ACTSTREAM_SETTINGS['MODELS'] setting
+  - Added AppConf to support Django>=1.7
+
+
 0.4.5
 -----
 

@@ -1,5 +1,6 @@
 # Django settings for example_project project.
-import os, sys
+import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -12,13 +13,31 @@ ADMINS = (
     ('Justin Quick', 'justquick@gmail.com'),
 )
 
-
+ENGINE = os.environ.get('DATABASE_ENGINE', 'django.db.backends.sqlite3')
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3', # Add 'postgresql_psycopg2', 'postgresql', 'mysql', 'sqlite3' or 'oracle'.
-        'NAME': 'dev.db',                      # Or path to database file if using sqlite3.
+        'ENGINE': ENGINE,
+        'NAME': ':memory:',
+        'OPTIONS': {
+        }
     }
 }
+
+if 'postgres' in ENGINE or 'mysql' in ENGINE:
+    USER, PASSWORD = 'test', 'test'
+    if os.environ.get('TRAVIS', False):
+        if 'mysql' in ENGINE:
+            USER, PASSWORD = 'travis', ''
+        else:
+            USER, PASSWORD = 'postgres', ''
+    DATABASES['default'].update(
+        NAME='test',
+        USER=os.environ.get('DATABASE_USER', USER),
+        PASSWORD=os.environ.get('DATABASE_PASSWORD', PASSWORD),
+        HOST=os.environ.get('DATABASE_HOST', 'localhost')
+    )
+
+print(ENGINE)
 
 # Local time zone for this installation. Choices can be found here:
 # http://en.wikipedia.org/wiki/List_of_tz_zones_by_name
@@ -53,7 +72,6 @@ SECRET_KEY = 'wzf0h@r2u%m^_zgj^39-y(kd%+n+j0r7=du(q0^s@q1asdfasdfasdft%^2!p'
 TEMPLATE_LOADERS = (
     'django.template.loaders.filesystem.Loader',
     'django.template.loaders.app_directories.Loader',
-#     'django.template.loaders.eggs.Loader',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -64,7 +82,7 @@ MIDDLEWARE_CLASSES = (
     'django.contrib.messages.middleware.MessageMiddleware',
 )
 
-ROOT_URLCONF = 'urls'
+ROOT_URLCONF = 'actstream.runtests.urls'
 
 TEMPLATE_DIRS = (
     'templates',
@@ -79,18 +97,14 @@ INSTALLED_APPS = (
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.admindocs',
-    'django.contrib.comments',
     'django.contrib.sites',
-    'django.contrib.messages',
+    'actstream.runtests.testapp',
+    'actstream.runtests.testapp_nested',
     'actstream',
-    'testapp'
 )
 
 TEMPLATE_CONTEXT_PROCESSORS = (
-    # for django 1.2 or 1.3
-    'django.core.context_processors.auth',
-    # for django 1.4 comment above line and uncomment below
-    #'django.contrib.auth.context_processors.auth',
+    'django.contrib.auth.context_processors.auth',
     'django.core.context_processors.debug',
     'django.core.context_processors.i18n',
     'django.core.context_processors.media',
@@ -99,14 +113,36 @@ TEMPLATE_CONTEXT_PROCESSORS = (
 
 
 ACTSTREAM_SETTINGS = {
-    'MODELS': ('auth.user', 'auth.group', 'sites.site', 'comments.comment'),
-    'MANAGER': 'testapp.streams.MyActionManager',
+    'MANAGER': 'actstream.runtests.testapp.streams.MyActionManager',
     'FETCH_RELATIONS': True,
     'USE_PREFETCH': True,
     'USE_JSONFIELD': True,
     'GFK_FETCH_DEPTH': 0,
 }
 
-if django.VERSION[0] == 1 and django.VERSION[1] >= 5:
+if django.VERSION[:2] < (1, 7):
+    SOUTH_MIGRATION_MODULES = {
+        'actstream': 'actstream.south_migrations',
+        'testapp': 'testapp.south_migrations',
+        'testapp_nested': 'testapp_nested.south_migrations',
+    }
+    INSTALLED_APPS += ('south',)
+    SOUTH_TESTS_MIGRATE = False
+
+if django.VERSION[:2] >= (1, 5):
     AUTH_USER_MODEL = 'testapp.MyUser'
-    ACTSTREAM_SETTINGS['MODELS'] += ('testapp.myuser',)
+
+
+try:
+    import django.test.simple
+except ImportError:
+    pass
+else:
+    TEST_RUNNER = 'django.test.simple.DjangoTestSuiteRunner'
+
+
+if 'COVERAGE' in os.environ:
+    INSTALLED_APPS += ('django_coverage',)
+    TEST_RUNNER = 'django_coverage.coverage_runner.CoverageRunner'
+    COVERAGE_REPORT_HTML_OUTPUT_DIR = 'coverage'
+    COVERAGE_REPORT_DATA_FILE = '.coverage'

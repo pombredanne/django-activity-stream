@@ -9,23 +9,32 @@ Using Builtin Streams
 **********************
 
 There are several builtin streams which cover the basics, but you are never limited to them.
+They are available as simple functions you can import from ``actstream.models``.
+Some are also available on any instance of a registered model using a ``GenericRelatedObjectManager`` behind the scenes.
+The examples below show you all ways of accessing them.
 
-User
------
+.. _user-stream:
+
+User Streams
+------------
 
 User streams are the most important, like your News Feed on `github <https://github.com/>`_. Basically you follow anyone (or anything) on your site and their actions show up here.
-These streams take one argument which is a ``User`` instance which is the one doing the following (usually ``request.user``)
+These streams take one argument which is a ``User`` instance which is the one doing the following (usually ``request.user``).
+
+If optional parameter ``with_user_activity`` is passed as ``True``, the stream will include user's own activity like Twitter. Default is ``False``
 
 .. code-block:: python
 
     from actstream.models import user_stream
 
-    user_stream(request.user)
+    user_stream(request.user, with_user_activity=True)
 
 Generates a stream of ``Actions`` from objects that ``request.user`` follows
 
-Actor
-------
+.. _actor-stream:
+
+Actor Streams
+-------------
 
 Actor streams show you what a particular actor object has done. Helpful for viewing "My Activities".
 
@@ -34,12 +43,15 @@ Actor streams show you what a particular actor object has done. Helpful for view
     from actstream.models import actor_stream
 
     actor_stream(request.user)
+    # OR
+    request.user.actor_actions.all()
 
 Generates a stream of ``Actions`` where the ``request.user`` was the ``actor``
 
+.. _object-stream:
 
-Action Object
---------------
+Action Object Streams
+---------------------
 
 Action object streams show you what actions a particular instance was used as the ``action_objct``
 
@@ -48,11 +60,33 @@ Action object streams show you what actions a particular instance was used as th
     from actstream.models import action_object_stream
 
     action_object_stream(comment)
+    # OR
+    comment.action_object_actions.all()
 
 Generates a stream of ``Actions`` where the ``comment`` was generated as the ``action_object``
 
-Model
-------
+.. _target-stream:
+
+Target Streams
+--------------
+
+Action object streams show you what actions a particular instance was used as the ``target``
+
+.. code-block:: python
+
+    from actstream.models import target_stream
+
+    target_stream(group)
+    # OR
+    group.target_actions.all()
+
+Generates a stream of ``Actions`` where the ``group`` was generated as the ``target``
+
+
+.. _model-stream:
+
+Model Streams
+-------------
 
 Model streams offer a much broader scope showing ALL ``Actions`` from any particular model.
 Argument may be a class or instance of the model.
@@ -64,6 +98,23 @@ Argument may be a class or instance of the model.
     model_stream(request.user)
 
 Generates a stream of ``Actions`` from all ``User`` instances.
+
+.. _any-stream:
+
+Any Streams
+-------------
+
+Any streams shows you what actions a particular object was involved in either acting as the ``actor``, ``target`` or ``action_object``.
+
+.. code-block:: python
+
+    from actstream.models import any_stream
+
+    any_stream(request.user)
+
+Generates a stream of ``Actions`` where ``request.user`` was involved in any part.
+
+
 
 
 .. _custom-streams:
@@ -87,7 +138,7 @@ When returning a queryset, you do NOT need to call ``fetch_generic_relations()``
 Example
 --------
 
-To start writing your custom stream module, create a file in your app called ``managers.py``
+To start writing your custom stream module, create a file in your app called ``myapp/managers.py``
 
 .. code-block:: python
 
@@ -106,7 +157,9 @@ To start writing your custom stream module, create a file in your app called ``m
                 time = datetime.now()
             return obj.actor_actions.filter(verb = verb, timestamp__lte = time)
 
-This defines a manager with one custom stream which filters for 'posted' actions by verb and timestamp.
+If you havent done so already, configure this manager to be your default ``Action`` manager by setting the :ref:`manager` setting.
+
+This example defines a manager with one custom stream which filters for 'posted' actions by verb and timestamp.
 
 Now that stream is available directly on the ``Action`` manager through ``Action.objects.mystream``
 or from the ``GenericRelation`` on any actionable model instance.
@@ -117,4 +170,8 @@ or from the ``GenericRelation`` on any actionable model instance.
     from actstream.models import Action
 
     user_instance = User.objects.all()[0]
+    Action.objects.mystream(user_instance, 'commented')
+    # OR
     user_instance.actor_actions.mystream('commented')
+
+
