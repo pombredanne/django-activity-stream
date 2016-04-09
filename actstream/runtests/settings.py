@@ -37,7 +37,7 @@ if 'postgres' in ENGINE or 'mysql' in ENGINE:
         HOST=os.environ.get('DATABASE_HOST', 'localhost')
     )
 
-print(ENGINE)
+print(DATABASES)
 
 # Local time zone for this installation. Choices can be found here:
 # http://en.wikipedia.org/wiki/List_of_tz_zones_by_name
@@ -139,10 +139,3 @@ except ImportError:
     pass
 else:
     TEST_RUNNER = 'django.test.simple.DjangoTestSuiteRunner'
-
-
-if 'COVERAGE' in os.environ:
-    INSTALLED_APPS += ('django_coverage',)
-    TEST_RUNNER = 'django_coverage.coverage_runner.CoverageRunner'
-    COVERAGE_REPORT_HTML_OUTPUT_DIR = 'coverage'
-    COVERAGE_REPORT_DATA_FILE = '.coverage'
